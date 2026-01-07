@@ -1587,6 +1587,17 @@ namespace DnsServerCore
             if (_webServiceHttpToTlsRedirect && !httpOnlyMode && _webServiceEnableTls && (_webServiceSslServerAuthenticationOptions is not null))
                 _webService.Use(WebServiceHttpsRedirectionMiddleware);
 
+            // SPA Fallback for /console: Rewrite paths without extension to index.html
+            _webService.Use(async (context, next) =>
+            {
+                if (context.Request.Path.StartsWithSegments("/console") && !Path.HasExtension(context.Request.Path.Value))
+                {
+                    context.Request.Path = "/console/index.html";
+                }
+
+                await next();
+            });
+
             _webService.UseDefaultFiles();
             _webService.UseStaticFiles(new StaticFileOptions()
             {
@@ -1667,6 +1678,8 @@ namespace DnsServerCore
             _webService.MapGetAndPost("/api/user/login", delegate (HttpContext context) { return _authApi.LoginAsync(context, UserSessionType.Standard); });
             _webService.MapGetAndPost("/api/user/createToken", delegate (HttpContext context) { return _authApi.LoginAsync(context, UserSessionType.ApiToken); });
             _webService.MapGetAndPost("/api/user/logout", _authApi.Logout);
+
+            _webService.MapFallbackToFile("/console/{*path:nonfile}", "console/index.html");
 
             //user
             _webService.MapGetAndPost("/api/user/session/get", _authApi.GetCurrentSessionDetails);
@@ -1887,6 +1900,12 @@ namespace DnsServerCore
 
         private async Task WebServiceApiMiddleware(HttpContext context, RequestDelegate next)
         {
+            if (context.Request.Path.Value.StartsWith("/console", StringComparison.OrdinalIgnoreCase))
+            {
+                await next(context);
+                return;
+            }
+
             HttpRequest request = context.Request;
 
             if (_clusterManager.ClusterInitialized)

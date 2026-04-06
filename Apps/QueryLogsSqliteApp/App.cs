@@ -1,6 +1,6 @@
 ﻿/*
 Technitium DNS Server
-Copyright (C) 2025  Shreyas Zare (shreyas@technitium.com)
+Copyright (C) 2026  Shreyas Zare (shreyas@technitium.com)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -278,7 +278,10 @@ namespace QueryLogsSqlite
 
                                 if (log.Response.Answer.Count == 0)
                                 {
-                                    paramAnswer.Value = DBNull.Value;
+                                    if (log.Response.Truncation)
+                                        paramAnswer.Value = "[TRUNCATED]";
+                                    else
+                                        paramAnswer.Value = DBNull.Value;
                                 }
                                 else if ((log.Response.Answer.Count > 2) && log.Response.IsZoneTransfer)
                                 {

@@ -1,6 +1,6 @@
 ﻿/*
 Technitium DNS Server
-Copyright (C) 2025  Shreyas Zare (shreyas@technitium.com)
+Copyright (C) 2026  Shreyas Zare (shreyas@technitium.com)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -94,9 +94,9 @@ namespace DnsServerCore.ApplicationCommon
         NetProxy Proxy { get; }
 
         /// <summary>
-        /// Tells if the DNS server prefers using IPv6 as per the settings.
+        /// The IPv6 mode configured on the DNS server.
         /// </summary>
-        bool PreferIPv6 { get; }
+        IPv6Mode IPv6Mode { get; }
 
         /// <summary>
         /// Returns the UDP payload size configured in the settings.

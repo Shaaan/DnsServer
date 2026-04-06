@@ -1,6 +1,6 @@
 ﻿/*
 Technitium DNS Server
-Copyright (C) 2025  Shreyas Zare (shreyas@technitium.com)
+Copyright (C) 2026  Shreyas Zare (shreyas@technitium.com)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -27,7 +27,8 @@ $(function () {
     }
     else {
         HTTPRequest({
-            url: "api/user/session/get?token=" + token,
+            url: "api/user/session/get",
+            token: token,
             success: function (responseJSON) {
                 sessionData = responseJSON;
                 localStorage.setItem("token", sessionData.token);
@@ -263,7 +264,8 @@ function login(username, password) {
 
 function logout() {
     HTTPRequest({
-        url: "api/user/logout?token=" + sessionData.token,
+        url: "api/user/logout",
+        token: sessionData.token,
         success: function (responseJSON) {
             sessionData = null;
             showPageLogin();
@@ -458,8 +460,9 @@ function changePassword(objBtn) {
 
     HTTPRequest({
         url: "api/user/changePassword",
+        token: sessionData.token,
         method: "POST",
-        data: "token=" + sessionData.token + "&pass=" + encodeURIComponent(password) + "&newPass=" + encodeURIComponent(newPassword) + "&totp=" + encodeURIComponent(totp),
+        data: "pass=" + encodeURIComponent(password) + "&newPass=" + encodeURIComponent(newPassword) + "&totp=" + encodeURIComponent(totp),
         processData: false,
         success: function (responseJSON) {
             $("#modalChangePassword").modal("hide");
@@ -500,7 +503,8 @@ function showConfigure2FAModal() {
     modalConfigure2FA.modal("show");
 
     HTTPRequest({
-        url: "api/user/2fa/init?token=" + sessionData.token,
+        url: "api/user/2fa/init",
+        token: sessionData.token,
         success: function (responseJSON) {
             $("#txtConfigure2FAUsername").val(sessionData.username);
             $("#lblConfigure2FAStatus").text(responseJSON.response.totpEnabled ? "Enabled" : "Disabled");
@@ -566,7 +570,11 @@ function enable2FA(objBtn) {
     btn.button("loading");
 
     HTTPRequest({
-        url: "api/user/2fa/enable?token=" + sessionData.token + "&totp=" + encodeURIComponent(totp),
+        url: "api/user/2fa/enable",
+        token: sessionData.token,
+        method: "POST",
+        data: "totp=" + encodeURIComponent(totp),
+        processData: false,
         success: function (responseJSON) {
             sessionData.totpEnabled = true;
 
@@ -600,7 +608,8 @@ function disable2FA(objBtn) {
     btn.button("loading");
 
     HTTPRequest({
-        url: "api/user/2fa/disable?token=" + sessionData.token,
+        url: "api/user/2fa/disable",
+        token: sessionData.token,
         success: function (responseJSON) {
             sessionData.totpEnabled = false;
 
@@ -633,7 +642,8 @@ function showMyProfileModal() {
     modalMyProfile.modal("show");
 
     HTTPRequest({
-        url: "api/user/profile/get?token=" + sessionData.token,
+        url: "api/user/profile/get",
+        token: sessionData.token,
         success: function (responseJSON) {
             sessionData.displayName = responseJSON.response.displayName;
             sessionData.username = responseJSON.response.username;
@@ -678,6 +688,10 @@ function showMyProfileModal() {
 
                         case "ApiToken":
                             session += "<br /><span class=\"label label-info\">API Token</span>";
+                            break;
+
+                        case "ClusterApiToken":
+                            session += "<br /><span class=\"label label-primary\">Cluster API Token</span>";
                             break;
 
                         default:
@@ -728,12 +742,13 @@ function saveMyProfile(objBtn) {
     if (sessionTimeoutSeconds === "")
         sessionTimeoutSeconds = 1800;
 
-    var apiUrl = "api/user/profile/set?token=" + sessionData.token + "&displayName=" + encodeURIComponent(displayName) + "&sessionTimeoutSeconds=" + encodeURIComponent(sessionTimeoutSeconds);
+    var apiUrl = "api/user/profile/set?displayName=" + encodeURIComponent(displayName) + "&sessionTimeoutSeconds=" + encodeURIComponent(sessionTimeoutSeconds);
 
     btn.button("loading");
 
     HTTPRequest({
         url: apiUrl,
+        token: sessionData.token,
         success: function (responseJSON) {
             sessionData.displayName = responseJSON.response.displayName;
             $("#mnuUserDisplayName").text(sessionData.displayName);
@@ -766,7 +781,7 @@ function deleteMySession(objMenuItem) {
     if (!confirm("Are you sure you want to delete the session [" + partialToken + "] ?"))
         return;
 
-    var apiUrl = "api/user/session/delete?token=" + sessionData.token + "&partialToken=" + encodeURIComponent(partialToken);
+    var apiUrl = "api/user/session/delete?partialToken=" + encodeURIComponent(partialToken);
 
     if (sessionType == "ApiToken")
         apiUrl += "&node=" + encodeURIComponent(getPrimaryClusterNodeName());
@@ -778,6 +793,7 @@ function deleteMySession(objMenuItem) {
 
     HTTPRequest({
         url: apiUrl,
+        token: sessionData.token,
         success: function (responseJSON) {
             $("#trMyProfileActiveSessions" + id).remove();
 
@@ -823,7 +839,8 @@ function refreshAdminSessions() {
     divAdminSessionsView.hide();
 
     HTTPRequest({
-        url: "api/admin/sessions/list?token=" + sessionData.token + "&node=" + encodeURIComponent(node),
+        url: "api/admin/sessions/list?node=" + encodeURIComponent(node),
+        token: sessionData.token,
         success: function (responseJSON) {
             var tableHtmlRows = "";
 
@@ -845,6 +862,10 @@ function refreshAdminSessions() {
 
                     case "ApiToken":
                         session += "<br /><span class=\"label label-info\">API Token</span>";
+                        break;
+
+                    case "ClusterApiToken":
+                        session += "<br /><span class=\"label label-primary\">Cluster API Token</span>";
                         break;
 
                     default:
@@ -905,7 +926,8 @@ function showCreateApiTokenModal() {
     modalCreateApiToken.modal("show");
 
     HTTPRequest({
-        url: "api/admin/users/list?token=" + sessionData.token,
+        url: "api/admin/users/list",
+        token: sessionData.token,
         success: function (responseJSON) {
             var userListHtml = "";
 
@@ -963,7 +985,8 @@ function createApiToken(objBtn) {
     btn.button("loading");
 
     HTTPRequest({
-        url: "api/admin/sessions/createToken?token=" + sessionData.token + "&user=" + encodeURIComponent(user) + "&tokenName=" + encodeURIComponent(tokenName),
+        url: "api/admin/sessions/createToken?user=" + encodeURIComponent(user) + "&tokenName=" + encodeURIComponent(tokenName),
+        token: sessionData.token,
         success: function (responseJSON) {
             btn.button("reset");
             btn.hide();
@@ -1001,7 +1024,7 @@ function deleteAdminSession(objMenuItem) {
     if (!confirm("Are you sure you want to delete the session [" + partialToken + "] ?"))
         return;
 
-    var apiUrl = "api/admin/sessions/delete?token=" + sessionData.token + "&partialToken=" + encodeURIComponent(partialToken);
+    var apiUrl = "api/admin/sessions/delete?partialToken=" + encodeURIComponent(partialToken);
 
     if (sessionType == "ApiToken")
         apiUrl += "&node=" + encodeURIComponent(getPrimaryClusterNodeName());
@@ -1015,6 +1038,7 @@ function deleteAdminSession(objMenuItem) {
 
     HTTPRequest({
         url: apiUrl,
+        token: sessionData.token,
         success: function (responseJSON) {
             $("#trAdminSessions" + id).remove();
 
@@ -1041,7 +1065,8 @@ function refreshAdminUsers() {
     divAdminUsersView.hide();
 
     HTTPRequest({
-        url: "api/admin/users/list?token=" + sessionData.token,
+        url: "api/admin/users/list",
+        token: sessionData.token,
         success: function (responseJSON) {
             var tableHtmlRows = "";
 
@@ -1150,8 +1175,9 @@ function addUser(objBtn) {
 
     HTTPRequest({
         url: "api/admin/users/create",
+        token: sessionData.token,
         method: "POST",
-        data: "token=" + sessionData.token + "&displayName=" + encodeURIComponent(displayName) + "&user=" + encodeURIComponent(user) + "&pass=" + encodeURIComponent(pass),
+        data: "displayName=" + encodeURIComponent(displayName) + "&user=" + encodeURIComponent(user) + "&pass=" + encodeURIComponent(pass),
         processData: false,
         success: function (responseJSON) {
             btn.button("reset");
@@ -1195,7 +1221,8 @@ function showUserDetailsModal(objMenuItem) {
     modalUserDetails.modal("show");
 
     HTTPRequest({
-        url: "api/admin/users/get?token=" + sessionData.token + "&user=" + encodeURIComponent(username) + "&includeGroups=true",
+        url: "api/admin/users/get?user=" + encodeURIComponent(username) + "&includeGroups=true",
+        token: sessionData.token,
         success: function (responseJSON) {
             $("#txtUserDetailsDisplayName").val(responseJSON.response.displayName);
             $("#txtUserDetailsUsername").val(responseJSON.response.username);
@@ -1239,6 +1266,10 @@ function showUserDetailsModal(objMenuItem) {
 
                     case "ApiToken":
                         session += "<br /><span class=\"label label-info\">API Token</span>";
+                        break;
+
+                    case "ClusterApiToken":
+                        session += "<br /><span class=\"label label-primary\">Cluster API Token</span>";
                         break;
 
                     default:
@@ -1293,7 +1324,7 @@ function deleteUserSession(objMenuItem) {
     if (!confirm("Are you sure you want to delete the session [" + partialToken + "] ?"))
         return;
 
-    var apiUrl = "api/admin/sessions/delete?token=" + sessionData.token + "&partialToken=" + encodeURIComponent(partialToken);
+    var apiUrl = "api/admin/sessions/delete?partialToken=" + encodeURIComponent(partialToken);
 
     if (sessionType == "ApiToken")
         apiUrl += "&node=" + encodeURIComponent(getPrimaryClusterNodeName());
@@ -1305,6 +1336,7 @@ function deleteUserSession(objMenuItem) {
 
     HTTPRequest({
         url: apiUrl,
+        token: sessionData.token,
         success: function (responseJSON) {
             $("#trUserDetailsActiveSessions" + id).remove();
 
@@ -1341,7 +1373,7 @@ function saveUserDetails(objBtn) {
 
     var memberOfGroups = cleanTextList($("#txtUserDetailsMemberOf").val());
 
-    var apiUrl = "api/admin/users/set?token=" + sessionData.token + "&user=" + encodeURIComponent(username) + "&displayName=" + encodeURIComponent(displayName) + "&disabled=" + disabled + "&sessionTimeoutSeconds=" + encodeURIComponent(sessionTimeoutSeconds) + "&memberOfGroups=" + encodeURIComponent(memberOfGroups);
+    var apiUrl = "api/admin/users/set?user=" + encodeURIComponent(username) + "&displayName=" + encodeURIComponent(displayName) + "&disabled=" + disabled + "&sessionTimeoutSeconds=" + encodeURIComponent(sessionTimeoutSeconds) + "&memberOfGroups=" + encodeURIComponent(memberOfGroups);
 
     if (newUsername !== username)
         apiUrl += "&newUser=" + encodeURIComponent(newUsername);
@@ -1350,6 +1382,7 @@ function saveUserDetails(objBtn) {
 
     HTTPRequest({
         url: apiUrl,
+        token: sessionData.token,
         success: function (responseJSON) {
             if (sessionData.username === username) {
                 sessionData.displayName = responseJSON.response.displayName;
@@ -1392,7 +1425,8 @@ function disableUser(objMenuItem) {
     btn.html("<img src='/img/loader-small.gif'/>");
 
     HTTPRequest({
-        url: "api/admin/users/set?token=" + sessionData.token + "&user=" + encodeURIComponent(username) + "&disabled=true",
+        url: "api/admin/users/set?user=" + encodeURIComponent(username) + "&disabled=true",
+        token: sessionData.token,
         success: function (responseJSON) {
             var tableHtmlRow = getAdminUsersRowHtml(id, responseJSON.response);
             $("#trAdminUsers" + id).replaceWith(tableHtmlRow);
@@ -1421,7 +1455,8 @@ function enableUser(objMenuItem) {
     btn.html("<img src='/img/loader-small.gif'/>");
 
     HTTPRequest({
-        url: "api/admin/users/set?token=" + sessionData.token + "&user=" + encodeURIComponent(username) + "&disabled=false",
+        url: "api/admin/users/set?user=" + encodeURIComponent(username) + "&disabled=false",
+        token: sessionData.token,
         success: function (responseJSON) {
             var tableHtmlRow = getAdminUsersRowHtml(id, responseJSON.response);
             $("#trAdminUsers" + id).replaceWith(tableHtmlRow);
@@ -1495,8 +1530,9 @@ function resetUserPassword(objBtn) {
 
     HTTPRequest({
         url: "api/admin/users/set",
+        token: sessionData.token,
         method: "POST",
-        data: "token=" + sessionData.token + "&user=" + encodeURIComponent(user) + "&newPass=" + encodeURIComponent(newPassword),
+        data: "user=" + encodeURIComponent(user) + "&newPass=" + encodeURIComponent(newPassword),
         processData: false,
         success: function (responseJSON) {
             $("#modalChangePassword").modal("hide");
@@ -1534,7 +1570,8 @@ function adminDisable2FA(objMenuItem) {
     btn.html("<img src='/img/loader-small.gif'/>");
 
     HTTPRequest({
-        url: "api/admin/users/set?token=" + sessionData.token + "&user=" + encodeURIComponent(username) + "&totpEnabled=false",
+        url: "api/admin/users/set?user=" + encodeURIComponent(username) + "&totpEnabled=false",
+        token: sessionData.token,
         success: function (responseJSON) {
             if (username == sessionData.username)
                 sessionData.totpEnabled = false;
@@ -1569,7 +1606,8 @@ function deleteUser(objMenuItem) {
     btn.html("<img src='/img/loader-small.gif'/>");
 
     HTTPRequest({
-        url: "api/admin/users/delete?token=" + sessionData.token + "&user=" + encodeURIComponent(username),
+        url: "api/admin/users/delete?user=" + encodeURIComponent(username),
+        token: sessionData.token,
         success: function (responseJSON) {
             $("#trAdminUsers" + id).remove();
 
@@ -1596,7 +1634,8 @@ function refreshAdminGroups() {
     divAdminGroupsView.hide();
 
     HTTPRequest({
-        url: "api/admin/groups/list?token=" + sessionData.token,
+        url: "api/admin/groups/list",
+        token: sessionData.token,
         success: function (responseJSON) {
             var tableHtmlRows = "";
 
@@ -1659,7 +1698,8 @@ function addGroup(objBtn) {
     btn.button("loading");
 
     HTTPRequest({
-        url: "api/admin/groups/create?token=" + sessionData.token + "&group=" + encodeURIComponent(group) + "&description=" + encodeURIComponent(description),
+        url: "api/admin/groups/create?group=" + encodeURIComponent(group) + "&description=" + encodeURIComponent(description),
+        token: sessionData.token,
         success: function (responseJSON) {
             btn.button("reset");
             $("#modalAddGroup").modal("hide");
@@ -1702,7 +1742,8 @@ function showGroupDetailsModal(objMenuItem) {
     modalGroupDetails.modal("show");
 
     HTTPRequest({
-        url: "api/admin/groups/get?token=" + sessionData.token + "&group=" + encodeURIComponent(group) + "&includeUsers=true",
+        url: "api/admin/groups/get?group=" + encodeURIComponent(group) + "&includeUsers=true",
+        token: sessionData.token,
         success: function (responseJSON) {
             $("#txtGroupDetailsName").val(responseJSON.response.name);
             $("#txtGroupDetailsDescription").val(responseJSON.response.description);
@@ -1758,7 +1799,7 @@ function saveGroupDetails(objBtn) {
 
     var members = cleanTextList($("#txtGroupDetailsMembers").val());
 
-    var apiUrl = "api/admin/groups/set?token=" + sessionData.token + "&group=" + encodeURIComponent(group) + "&description=" + encodeURIComponent(description) + "&members=" + encodeURIComponent(members);
+    var apiUrl = "api/admin/groups/set?group=" + encodeURIComponent(group) + "&description=" + encodeURIComponent(description) + "&members=" + encodeURIComponent(members);
 
     if (newGroup !== group)
         apiUrl += "&newGroup=" + encodeURIComponent(newGroup);
@@ -1767,6 +1808,7 @@ function saveGroupDetails(objBtn) {
 
     HTTPRequest({
         url: apiUrl,
+        token: sessionData.token,
         success: function (responseJSON) {
             var tableHtmlRow = getAdminGroupsRowHtml(id, responseJSON.response);
             $("#trAdminGroups" + id).replaceWith(tableHtmlRow);
@@ -1803,7 +1845,8 @@ function deleteGroup(objMenuItem) {
     btn.html("<img src='/img/loader-small.gif'/>");
 
     HTTPRequest({
-        url: "api/admin/groups/delete?token=" + sessionData.token + "&group=" + encodeURIComponent(group),
+        url: "api/admin/groups/delete?group=" + encodeURIComponent(group),
+        token: sessionData.token,
         success: function (responseJSON) {
             $("#trAdminGroups" + id).remove();
 
@@ -1830,7 +1873,8 @@ function refreshAdminPermissions() {
     divAdminPermissionsView.hide();
 
     HTTPRequest({
-        url: "api/admin/permissions/list?token=" + sessionData.token,
+        url: "api/admin/permissions/list",
+        token: sessionData.token,
         success: function (responseJSON) {
             var tableHtmlRows = "";
 
@@ -1920,7 +1964,8 @@ function showEditSectionPermissionsModal(objMenuItem) {
     modalEditPermissions.modal("show");
 
     HTTPRequest({
-        url: "api/admin/permissions/get?token=" + sessionData.token + "&section=" + section + "&includeUsersAndGroups=true",
+        url: "api/admin/permissions/get?section=" + section + "&includeUsersAndGroups=true",
+        token: sessionData.token,
         success: function (responseJSON) {
             $("#lblEditPermissionsName").text(responseJSON.response.section);
 
@@ -2006,12 +2051,13 @@ function saveSectionPermissions(objBtn) {
     var userPermissions = serializeTableData($("#tableEditPermissionsUser"), 4);
     var groupPermissions = serializeTableData($("#tableEditPermissionsGroup"), 4);
 
-    var apiUrl = "api/admin/permissions/set?token=" + sessionData.token + "&section=" + encodeURIComponent(section) + "&userPermissions=" + encodeURIComponent(userPermissions) + "&groupPermissions=" + encodeURIComponent(groupPermissions) + "&node=" + encodeURIComponent(getPrimaryClusterNodeName());
+    var apiUrl = "api/admin/permissions/set?section=" + encodeURIComponent(section) + "&userPermissions=" + encodeURIComponent(userPermissions) + "&groupPermissions=" + encodeURIComponent(groupPermissions) + "&node=" + encodeURIComponent(getPrimaryClusterNodeName());
 
     btn.button("loading");
 
     HTTPRequest({
         url: apiUrl,
+        token: sessionData.token,
         success: function (responseJSON) {
             var tableHtmlRow = getAdminPermissionsRowHtml(id, responseJSON.response);
             $("#trAdminPermissions" + id).replaceWith(tableHtmlRow);

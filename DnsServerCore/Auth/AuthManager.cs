@@ -1,6 +1,6 @@
 ﻿/*
 Technitium DNS Server
-Copyright (C) 2025  Shreyas Zare (shreyas@technitium.com)
+Copyright (C) 2026  Shreyas Zare (shreyas@technitium.com)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -26,6 +26,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using TechnitiumLibrary.IO;
 using TechnitiumLibrary.Net;
 using TechnitiumLibrary.Security.OTP;
 
@@ -49,7 +50,7 @@ namespace DnsServerCore.Auth
         readonly string _configFolder;
         readonly LogManager _log;
 
-        readonly object _saveLock = new object();
+        readonly Lock _saveLock = new Lock();
         bool _pendingSave;
         readonly Timer _saveTimer;
         const int SAVE_TIMER_INITIAL_INTERVAL = 5000;
@@ -258,6 +259,7 @@ namespace DnsServerCore.Auth
 
         private void SaveConfigFileInternal()
         {
+            string tmpConfigFile = Path.Combine(_configFolder, "auth.tmp");
             string configFile = Path.Combine(_configFolder, "auth.config");
 
             using (MemoryStream mS = new MemoryStream())
@@ -268,11 +270,13 @@ namespace DnsServerCore.Auth
                 //write config
                 mS.Position = 0;
 
-                using (FileStream fS = new FileStream(configFile, FileMode.Create, FileAccess.Write))
+                using (FileStream fS = new FileStream(tmpConfigFile, FileMode.Create, FileAccess.Write))
                 {
                     mS.CopyTo(fS);
                 }
             }
+
+            File.Move(tmpConfigFile, configFile, true);
 
             _log.Write("DNS Server auth config file was saved: " + configFile);
         }
@@ -291,15 +295,15 @@ namespace DnsServerCore.Auth
 
         private void ReadConfigFrom(Stream s, bool isConfigTransfer)
         {
-            BinaryReader bR = new BinaryReader(s);
-
-            if (Encoding.ASCII.GetString(bR.ReadBytes(2)) != "AS") //format
+            if (Encoding.ASCII.GetString(s.ReadExactly(2)) != "AS") //format
                 throw new InvalidDataException("DNS Server auth config file format is invalid.");
 
             ConcurrentDictionary<string, Group> groups = new ConcurrentDictionary<string, Group>(1, 4);
             ConcurrentDictionary<string, User> users = new ConcurrentDictionary<string, User>(1, 4);
             ConcurrentDictionary<PermissionSection, Permission> permissions = new ConcurrentDictionary<PermissionSection, Permission>(1, 11);
             ConcurrentDictionary<string, UserSession> sessions = new ConcurrentDictionary<string, UserSession>(1, 10);
+
+            BinaryReader bR = new BinaryReader(s);
 
             int version = bR.ReadByte();
             switch (version)
@@ -382,17 +386,25 @@ namespace DnsServerCore.Auth
                 //sync only API sessions from newly loaded config
                 foreach (KeyValuePair<string, UserSession> existingSession in _sessions)
                 {
-                    if (existingSession.Value.Type == UserSessionType.ApiToken)
+                    switch (existingSession.Value.Type)
                     {
-                        if (!sessions.ContainsKey(existingSession.Key))
-                            _sessions.TryRemove(existingSession);
+                        case UserSessionType.ApiToken:
+                        case UserSessionType.ClusterApiToken:
+                            if (!sessions.ContainsKey(existingSession.Key))
+                                _sessions.TryRemove(existingSession);
+                            break;
                     }
                 }
 
                 foreach (KeyValuePair<string, UserSession> session in sessions)
                 {
-                    if (session.Value.Type == UserSessionType.ApiToken)
-                        _sessions[session.Key] = session.Value;
+                    switch (session.Value.Type)
+                    {
+                        case UserSessionType.ApiToken:
+                        case UserSessionType.ClusterApiToken:
+                            _sessions[session.Key] = session.Value;
+                            break;
+                    }
                 }
             }
             else
@@ -840,6 +852,9 @@ namespace DnsServerCore.Auth
         {
             User user = await AuthenticateUserAsync(username, password, totp, remoteAddress);
 
+            if (type == UserSessionType.ClusterApiToken)
+                throw new InvalidOperationException();
+
             UserSession session = new UserSession(type, tokenName, user, remoteAddress, userAgent);
 
             if (!_sessions.TryAdd(session.Token, session))
@@ -850,16 +865,21 @@ namespace DnsServerCore.Auth
             return session;
         }
 
-        public UserSession CreateApiToken(string tokenName, string username, IPAddress remoteAddress, string userAgent)
+        public UserSession CreateSession(UserSessionType type, string tokenName, string username, IPAddress remoteAddress, string userAgent)
         {
             User user = GetUser(username);
             if (user is null)
                 throw new DnsWebServiceException("No such user exists: " + username);
 
+            return CreateSession(type, tokenName, user, remoteAddress, userAgent);
+        }
+
+        public UserSession CreateSession(UserSessionType type, string tokenName, User user, IPAddress remoteAddress, string userAgent)
+        {
             if (user.Disabled)
                 throw new DnsWebServiceException("Account is suspended.");
 
-            UserSession session = new UserSession(UserSessionType.ApiToken, tokenName, user, remoteAddress, userAgent);
+            UserSession session = new UserSession(type, tokenName, user, remoteAddress, userAgent);
 
             if (!_sessions.TryAdd(session.Token, session))
                 throw new DnsWebServiceException("Error while creating session. Please try again.");

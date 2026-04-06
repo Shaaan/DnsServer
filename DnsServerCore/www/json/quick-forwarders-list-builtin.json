@@ -215,8 +215,8 @@
 		"name": "OpenDNS (DNS-over-UDP IPv6)",
 		"protocol": "UDP",
 		"addresses": [
-			"[2620:0:ccc::2]",
-			"[2620:0:ccd::2]"
+			"[2620:119:35::35]",
+			"[2620:119:53::53]"
 		]
 	},
 	{
@@ -231,8 +231,8 @@
 		"name": "OpenDNS (DNS-over-TCP IPv6)",
 		"protocol": "TCP",
 		"addresses": [
-			"[2620:0:ccc::2]",
-			"[2620:0:ccd::2]"
+			"[2620:119:35::35]",
+			"[2620:119:53::53]"
 		]
 	},
 	{
@@ -247,8 +247,8 @@
 		"name": "OpenDNS (DNS-over-TLS IPv6)",
 		"protocol": "TLS",
 		"addresses": [
-			"dns.opendns.com ([2620:0:ccc::2]:853)",
-			"dns.opendns.com ([2620:0:ccd::2]:853)"
+			"dns.opendns.com ([2620:119:35::35]:853)",
+			"dns.opendns.com ([2620:119:53::53]:853)"
 		]
 	},
 	{
@@ -263,8 +263,8 @@
 		"name": "OpenDNS (DNS-over-HTTPS IPv6)",
 		"protocol": "HTTPS",
 		"addresses": [
-			"https://doh.opendns.com/dns-query ([2620:0:ccc::2])",
-			"https://doh.opendns.com/dns-query ([2620:0:ccd::2])"
+			"https://doh.opendns.com/dns-query ([2620:119:35::35])",
+			"https://doh.opendns.com/dns-query ([2620:119:53::53])"
 		]
 	},
 	{

@@ -31,3 +31,7 @@ The environment variables are described below:
 | DNS_SERVER_FORWARDERS                          | String  | A comma separated list of forwarder addresses.                                                                                           |
 | DNS_SERVER_FORWARDER_PROTOCOL                  | String  | Forwarder protocol options: `Udp`, `Tcp`, `Tls`, `Https`, `HttpsJson`.                                                                   |
 | DNS_SERVER_LOG_USING_LOCAL_TIME                | Boolean | Enable this option to use local time instead of UTC for logging.                                                                         |
+| DNS_SERVER_LOG_FOLDER_PATH                     | String  | The folder path on the server where the log files should be saved. The path can be relative to the DNS server's config folder.
+| DNS_SERVER_LOG_MAX_LOG_FILE_DAYS               | Integer | Max number of days to keep the log files. Log files older than the specified number of days will be deleted automatically. Set 0 to disable auto delete.
+| DNS_SERVER_STATS_ENABLE_IN_MEMORY_STATS        | Boolean | This option will enable in-memory stats and only Last Hour data will be available on Dashboard. No stats data will be stored on disk.
+| DNS_SERVER_STATS_MAX_STAT_FILE_DAYS            | Integer | Max number of days to keep the dashboard stats. Stat files older than the specified number of days will be deleted automatically. Set 0 to disable auto delete.

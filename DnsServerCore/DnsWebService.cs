@@ -1,6 +1,6 @@
 ﻿/*
 Technitium DNS Server
-Copyright (C) 2025  Shreyas Zare (shreyas@technitium.com)
+Copyright (C) 2026  Shreyas Zare (shreyas@technitium.com)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -36,6 +36,7 @@ using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -112,7 +113,7 @@ namespace DnsServerCore
 
         List<string> _configDisabledZones;
 
-        readonly object _saveLock = new object();
+        readonly Lock _saveLock = new Lock();
         bool _pendingSave;
         readonly Timer _saveTimer;
         const int SAVE_TIMER_INITIAL_INTERVAL = 5000;
@@ -123,7 +124,7 @@ namespace DnsServerCore
 
         #region constructor
 
-        public DnsWebService(string configFolder = null, Uri updateCheckUri = null)
+        public DnsWebService(bool isPortableApp, string configFolder = null, Uri updateCheckUri = null)
         {
             Assembly assembly = Assembly.GetExecutingAssembly();
 
@@ -139,7 +140,7 @@ namespace DnsServerCore
             Directory.CreateDirectory(Path.Combine(_configFolder, "blocklists"));
             Directory.CreateDirectory(Path.Combine(_configFolder, "zones"));
 
-            _log = new LogManager(_configFolder);
+            _log = new LogManager(isPortableApp, _configFolder);
             _authManager = new AuthManager(_configFolder, _log);
 
             _api = new WebServiceApi(this, updateCheckUri);
@@ -213,7 +214,9 @@ namespace DnsServerCore
             await StopAsync();
 
             _authManager?.Dispose();
-            _log?.Dispose();
+
+            if (_log is not null)
+                await _log.DisposeAsync();
 
             _disposed = true;
         }
@@ -355,6 +358,7 @@ namespace DnsServerCore
 
         private void SaveConfigFileInternal()
         {
+            string tmpConfigFile = Path.Combine(_configFolder, "webservice.tmp");
             string configFile = Path.Combine(_configFolder, "webservice.config");
 
             using (MemoryStream mS = new MemoryStream())
@@ -365,11 +369,13 @@ namespace DnsServerCore
                 //write config
                 mS.Position = 0;
 
-                using (FileStream fS = new FileStream(configFile, FileMode.Create, FileAccess.Write))
+                using (FileStream fS = new FileStream(tmpConfigFile, FileMode.Create, FileAccess.Write))
                 {
                     mS.CopyTo(fS);
                 }
             }
+
+            File.Move(tmpConfigFile, configFile, true);
 
             _log.Write("Web Service config file was saved: " + configFile);
         }
@@ -432,10 +438,10 @@ namespace DnsServerCore
 
         private void ReadConfigFrom(Stream s)
         {
-            BinaryReader bR = new BinaryReader(s);
-
-            if (Encoding.ASCII.GetString(bR.ReadBytes(2)) != "WC") //format
+            if (Encoding.ASCII.GetString(s.ReadExactly(2)) != "WC") //format
                 throw new InvalidDataException("Web Service config file format is invalid.");
+
+            BinaryReader bR = new BinaryReader(s);
 
             int version = bR.ReadByte();
             if (version > 1)
@@ -470,8 +476,8 @@ namespace DnsServerCore
             _webServiceHttpToTlsRedirect = bR.ReadBoolean();
             _webServiceUseSelfSignedTlsCertificate = bR.ReadBoolean();
 
-            _webServiceTlsCertificatePath = bR.ReadShortString();
-            _webServiceTlsCertificatePassword = bR.ReadShortString();
+            _webServiceTlsCertificatePath = s.ReadShortString();
+            _webServiceTlsCertificatePassword = s.ReadShortString();
 
             if (_webServiceTlsCertificatePath.Length == 0)
                 _webServiceTlsCertificatePath = null;
@@ -498,7 +504,7 @@ namespace DnsServerCore
 
             CheckAndLoadSelfSignedCertificate(false, false);
 
-            _webServiceRealIpHeader = bR.ReadShortString();
+            _webServiceRealIpHeader = s.ReadShortString();
         }
 
         private void WriteConfigTo(Stream s)
@@ -524,16 +530,16 @@ namespace DnsServerCore
             bW.Write(_webServiceUseSelfSignedTlsCertificate);
 
             if (_webServiceTlsCertificatePath is null)
-                bW.WriteShortString(string.Empty);
+                s.WriteShortString(string.Empty);
             else
-                bW.WriteShortString(_webServiceTlsCertificatePath);
+                s.WriteShortString(_webServiceTlsCertificatePath);
 
             if (_webServiceTlsCertificatePassword is null)
-                bW.WriteShortString(string.Empty);
+                s.WriteShortString(string.Empty);
             else
-                bW.WriteShortString(_webServiceTlsCertificatePassword);
+                s.WriteShortString(_webServiceTlsCertificatePassword);
 
-            bW.WriteShortString(_webServiceRealIpHeader);
+            s.WriteShortString(_webServiceRealIpHeader);
         }
 
         #endregion
@@ -1694,6 +1700,7 @@ namespace DnsServerCore
             _webService.MapFallbackToFile("/console/{*path:nonfile}", "console/index.html");
 
             //user
+            _webService.MapGetAndPost("/api/user/createSingleUseToken", _authApi.CreateSingleUseToken);
             _webService.MapGetAndPost("/api/user/session/get", _authApi.GetCurrentSessionDetails);
             _webService.MapGetAndPost("/api/user/session/delete", delegate (HttpContext context) { _authApi.DeleteSession(context, false); });
             _webService.MapGetAndPost("/api/user/changePassword", _authApi.ChangePasswordAsync);
@@ -1705,6 +1712,7 @@ namespace DnsServerCore
             _webService.MapGetAndPost("/api/user/checkForUpdate", _api.CheckForUpdateAsync);
 
             //dashboard
+            _webService.MapGetAndPost("/api/dashboard/stats/metrics", _dashboardApi.GetMetrics);
             _webService.MapGetAndPost("/api/dashboard/stats/get", _dashboardApi.GetStats);
             _webService.MapGetAndPost("/api/dashboard/stats/getTop", _dashboardApi.GetTopStats);
             _webService.MapGetAndPost("/api/dashboard/stats/deleteAll", _logsApi.DeleteAllStats);
@@ -1738,6 +1746,7 @@ namespace DnsServerCore
             _webService.MapGetAndPost("/api/zones/dnssec/properties/updatePrivateKey", _zonesApi.UpdatePrimaryZoneDnssecPrivateKey);
             _webService.MapGetAndPost("/api/zones/dnssec/properties/deletePrivateKey", _zonesApi.DeletePrimaryZoneDnssecPrivateKey);
             _webService.MapGetAndPost("/api/zones/dnssec/properties/publishAllPrivateKeys", _zonesApi.PublishAllGeneratedPrimaryZoneDnssecPrivateKeys);
+            _webService.MapGetAndPost("/api/zones/dnssec/properties/activateKskDnsKey", _zonesApi.ActivatePrimaryZoneKskDnsKey);
             _webService.MapGetAndPost("/api/zones/dnssec/properties/rolloverDnsKey", _zonesApi.RolloverPrimaryZoneDnsKey);
             _webService.MapGetAndPost("/api/zones/dnssec/properties/retireDnsKey", _zonesApi.RetirePrimaryZoneDnsKeyAsync);
             _webService.MapGetAndPost("/api/zones/records/add", _zonesApi.AddRecord);
@@ -2122,7 +2131,6 @@ namespace DnsServerCore
 
                             jsonWriter.WriteString("status", "error");
                             jsonWriter.WriteString("errorMessage", ex.Message);
-                            jsonWriter.WriteString("stackTrace", ex.StackTrace);
 
                             if (ex.InnerException is not null)
                                 jsonWriter.WriteString("innerErrorMessage", ex.InnerException.Message);
@@ -2134,23 +2142,56 @@ namespace DnsServerCore
             });
         }
 
+        private static string GetAuthorizationToken(HttpRequest request)
+        {
+            StringValues authorization = request.Headers.Authorization;
+            string token = null;
+
+            foreach (string entry in authorization)
+            {
+                if (entry.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                {
+                    token = entry.Substring(7).Trim();
+                    break;
+                }
+            }
+
+            if (token is null)
+                token = request.QueryOrForm("token");
+
+            if (string.IsNullOrEmpty(token))
+                throw new DnsWebServiceException("Authorization token missing.");
+
+            return token;
+        }
+
         private bool TryGetSession(HttpContext context, out UserSession session)
         {
-            string token = context.Request.GetQueryOrForm("token");
-            session = _authManager.GetSession(token);
+            HttpRequest request = context.Request;
+
+            session = _authManager.GetSession(GetAuthorizationToken(request));
             if ((session is null) || session.User.Disabled)
                 return false;
 
-            if (session.HasExpired())
+            if (session.Type == UserSessionType.SingleUse)
             {
+                //delete single use session immediately and continue
                 _authManager.DeleteSession(session.Token);
-                _authManager.SaveConfigFile();
-                return false;
+            }
+            else
+            {
+                if (session.HasExpired())
+                {
+                    _authManager.DeleteSession(session.Token);
+                    _authManager.SaveConfigFile();
+                    return false;
+                }
+
+                IPEndPoint remoteEP = context.GetRemoteEndPoint(_webServiceRealIpHeader);
+
+                session.UpdateLastSeen(remoteEP.Address, request.Headers.UserAgent);
             }
 
-            IPEndPoint remoteEP = context.GetRemoteEndPoint(_webServiceRealIpHeader);
-
-            session.UpdateLastSeen(remoteEP.Address, context.Request.Headers.UserAgent);
             return true;
         }
 
@@ -2158,18 +2199,18 @@ namespace DnsServerCore
         {
             UserSession session = context.GetCurrentSession();
 
-            if ((session.Type == UserSessionType.ApiToken) && _clusterManager.ClusterInitialized && session.TokenName.Equals(_clusterManager.ClusterDomain, StringComparison.OrdinalIgnoreCase))
+            if ((session.Type == UserSessionType.ClusterApiToken) && _clusterManager.ClusterInitialized)
             {
                 //proxy call from cluster node 
-                string username = context.Request.GetQueryOrForm("actingUser", null);
-                if (username is null)
+                string actingUsername = context.Request.GetQueryOrForm("actingUser", null);
+                if (actingUsername is null)
                     return session.User;
 
-                User user = _authManager.GetUser(username);
-                if (user is null)
-                    throw new DnsWebServiceException("No such user exists: " + username);
+                User actingUser = _authManager.GetUser(actingUsername);
+                if (actingUser is null)
+                    throw new DnsWebServiceException("No such user exists: " + actingUsername);
 
-                return user;
+                return actingUser;
             }
             else
             {
@@ -2390,25 +2431,13 @@ namespace DnsServerCore
 
         private static void ValidateQuicSupport(string protocolName = "DNS-over-QUIC")
         {
-#pragma warning disable CA2252 // This API requires opting into preview features
-#pragma warning disable CA1416 // Validate platform compatibility
-
             if (!QuicConnection.IsSupported)
                 throw new DnsWebServiceException(protocolName + " is supported only on Windows 11, Windows Server 2022, and Linux. On Linux, you must install 'libmsquic' manually.");
-
-#pragma warning restore CA1416 // Validate platform compatibility
-#pragma warning restore CA2252 // This API requires opting into preview features
         }
 
         private static bool IsQuicSupported()
         {
-#pragma warning disable CA2252 // This API requires opting into preview features
-#pragma warning disable CA1416 // Validate platform compatibility
-
             return QuicConnection.IsSupported;
-
-#pragma warning restore CA1416 // Validate platform compatibility
-#pragma warning restore CA2252 // This API requires opting into preview features
         }
 
         #endregion
@@ -2507,11 +2536,8 @@ namespace DnsServerCore
                 _dnsServer.BlockedZoneManager.LoadBlockedZoneFile();
                 _dnsServer.BlockListZoneManager.LoadConfigFile();
 
-                //init cluster manager
+                //init cluster manager and load config file
                 _clusterManager = new ClusterManager(this);
-
-                //load cluster config file
-                _clusterManager.LoadConfigFile();
 
                 //start web service
                 if (throwIfBindFails)

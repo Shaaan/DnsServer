@@ -1,6 +1,6 @@
 ﻿/*
 Technitium DNS Server
-Copyright (C) 2025  Shreyas Zare (shreyas@technitium.com)
+Copyright (C) 2026  Shreyas Zare (shreyas@technitium.com)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -878,6 +878,7 @@ namespace DnsServerCore
                         jsonWriter.WriteString("smoothedRoundTripTime", Math.Round(metadata.SRTT, 2) + " ms");
                         jsonWriter.WriteString("smoothedPenaltyRoundTripTime", Math.Round(metadata.SPRTT, 2) + " ms");
                         jsonWriter.WriteString("netRoundTripTime", Math.Round(metadata.GetNetRTT(), 2) + " ms");
+                        jsonWriter.WriteBoolean("isMisconfigured", metadata.IsMisconfigured);
 
                         jsonWriter.WriteEndObject();
                     }
@@ -1226,6 +1227,7 @@ namespace DnsServerCore
             {
                 List<DnsResourceRecord> records = await ZoneFile.ReadZoneFileFromAsync(zoneFile, zoneName, _dnsWebService._dnsServer.AuthZoneManager.DefaultRecordTtl);
                 List<DnsResourceRecord> newRecords = new List<DnsResourceRecord>(records.Count);
+                DateTime utcNow = DateTime.UtcNow;
 
                 foreach (DnsResourceRecord record in records)
                 {
@@ -1289,6 +1291,7 @@ namespace DnsServerCore
                                 {
                                     NSRecordInfo rrInfo = new NSRecordInfo();
 
+                                    rrInfo.LastModified = utcNow;
                                     rrInfo.Disabled = disabled;
                                     rrInfo.Comments = comments;
 
@@ -1306,6 +1309,8 @@ namespace DnsServerCore
                                 if (record.Tag is string)
                                 {
                                     SOARecordInfo rrInfo = new SOARecordInfo();
+
+                                    rrInfo.LastModified = utcNow;
                                     rrInfo.Comments = comments;
 
                                     record.Tag = rrInfo;
@@ -1322,6 +1327,7 @@ namespace DnsServerCore
                                 {
                                     SVCBRecordInfo rrInfo = new SVCBRecordInfo();
 
+                                    rrInfo.LastModified = utcNow;
                                     rrInfo.Disabled = disabled;
                                     rrInfo.Comments = comments;
 
@@ -1355,6 +1361,7 @@ namespace DnsServerCore
                                 {
                                     GenericRecordInfo rrInfo = new GenericRecordInfo();
 
+                                    rrInfo.LastModified = utcNow;
                                     rrInfo.Disabled = disabled;
                                     rrInfo.Comments = comments;
 
@@ -2262,12 +2269,22 @@ namespace DnsServerCore
                 if (DnsClient.IsDomainNameUnicode(zoneName))
                     zoneName = DnsClient.ConvertDomainNameToAscii(zoneName);
 
-                if (!_dnsWebService._authManager.IsPermitted(PermissionSection.Zones, zoneName, sessionUser, PermissionFlag.Delete))
+                AuthZoneInfo zoneInfo = _dnsWebService._dnsServer.AuthZoneManager.GetAuthZoneInfo(zoneName);
+                if (zoneInfo is null)
+                    throw new DnsWebServiceException("No such zone was found: " + zoneName);
+
+                if (zoneInfo.Internal)
+                    throw new DnsWebServiceException("Access was denied to manage internal DNS Server zone.");
+
+                if (!_dnsWebService._authManager.IsPermitted(PermissionSection.Zones, zoneInfo.Name, sessionUser, PermissionFlag.Delete))
                     throw new DnsWebServiceException("Access was denied.");
 
-                _dnsWebService._dnsServer.AuthZoneManager.UnsignPrimaryZone(zoneName);
+                if ((zoneInfo.Type == AuthZoneType.Primary) && _dnsWebService._clusterManager.ClusterInitialized && _dnsWebService._clusterManager.IsClusterPrimaryZone(zoneInfo.Name))
+                    throw new DnsWebServiceException("Cannot unsign the Cluster Primary zone '" + zoneInfo.DisplayName + "'.");
 
-                _dnsWebService._log.Write(context.GetRemoteEndPoint(_dnsWebService._webServiceRealIpHeader), "[" + sessionUser.Username + "] Primary zone was unsigned successfully: " + zoneName);
+                _dnsWebService._dnsServer.AuthZoneManager.UnsignPrimaryZone(zoneInfo.Name);
+
+                _dnsWebService._log.Write(context.GetRemoteEndPoint(_dnsWebService._webServiceRealIpHeader), "[" + sessionUser.Username + "] Primary zone was unsigned successfully: " + zoneInfo.Name);
             }
 
             public void GetPrimaryZoneDsInfo(HttpContext context)
@@ -2757,6 +2774,30 @@ namespace DnsServerCore
                 _dnsWebService._dnsServer.AuthZoneManager.PublishAllGeneratedPrimaryZoneDnssecPrivateKeys(zoneName);
 
                 _dnsWebService._log.Write(context.GetRemoteEndPoint(_dnsWebService._webServiceRealIpHeader), "[" + sessionUser.Username + "] All DNSSEC private keys from the primary zone were published successfully: " + zoneName);
+            }
+
+            public void ActivatePrimaryZoneKskDnsKey(HttpContext context)
+            {
+                User sessionUser = _dnsWebService.GetSessionUser(context);
+
+                if (!_dnsWebService._authManager.IsPermitted(PermissionSection.Zones, sessionUser, PermissionFlag.Modify))
+                    throw new DnsWebServiceException("Access was denied.");
+
+                HttpRequest request = context.Request;
+
+                string zoneName = request.GetQueryOrForm("zone").Trim('.');
+
+                if (DnsClient.IsDomainNameUnicode(zoneName))
+                    zoneName = DnsClient.ConvertDomainNameToAscii(zoneName);
+
+                if (!_dnsWebService._authManager.IsPermitted(PermissionSection.Zones, zoneName, sessionUser, PermissionFlag.Delete))
+                    throw new DnsWebServiceException("Access was denied.");
+
+                ushort keyTag = request.GetQueryOrForm("keyTag", ushort.Parse);
+
+                _dnsWebService._dnsServer.AuthZoneManager.ActivatePrimaryZoneKskDnsKey(zoneName, keyTag);
+
+                _dnsWebService._log.Write(context.GetRemoteEndPoint(_dnsWebService._webServiceRealIpHeader), "[" + sessionUser.Username + "] The KSK DNSKEY (" + keyTag + ") from the primary zone was activated over successfully: " + zoneName);
             }
 
             public void RolloverPrimaryZoneDnsKey(HttpContext context)
@@ -3778,7 +3819,7 @@ namespace DnsServerCore
                                 string ptrDomain = Zone.GetReverseZone(ipAddress, type == DnsResourceRecordType.A ? 32 : 128);
 
                                 AuthZoneInfo reverseZoneInfo = _dnsWebService._dnsServer.AuthZoneManager.FindAuthZoneInfo(ptrDomain);
-                                if (reverseZoneInfo is null)
+                                if ((reverseZoneInfo is null) || ((reverseZoneInfo.Name.Length == 0) && (reverseZoneInfo.Type == AuthZoneType.Secondary)))
                                 {
                                     bool createPtrZone = request.GetQueryOrForm("createPtrZone", bool.Parse, false);
                                     if (!createPtrZone)
@@ -4573,7 +4614,7 @@ namespace DnsServerCore
                                 string newPtrDomain = Zone.GetReverseZone(newIpAddress, type == DnsResourceRecordType.A ? 32 : 128);
 
                                 AuthZoneInfo newReverseZoneInfo = _dnsWebService._dnsServer.AuthZoneManager.FindAuthZoneInfo(newPtrDomain);
-                                if (newReverseZoneInfo is null)
+                                if ((newReverseZoneInfo is null) || ((newReverseZoneInfo.Name.Length == 0) && (newReverseZoneInfo.Type == AuthZoneType.Secondary)))
                                 {
                                     bool createPtrZone = request.GetQueryOrForm("createPtrZone", bool.Parse, false);
                                     if (!createPtrZone)

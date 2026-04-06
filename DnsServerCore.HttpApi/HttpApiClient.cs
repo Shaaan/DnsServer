@@ -1,6 +1,6 @@
 ﻿/*
 Technitium DNS Server
-Copyright (C) 2025  Shreyas Zare (shreyas@technitium.com)
+Copyright (C) 2026  Shreyas Zare (shreyas@technitium.com)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -63,17 +63,17 @@ namespace DnsServerCore.HttpApi
             _serializerOptions.PropertyNameCaseInsensitive = true;
         }
 
-        public HttpApiClient(string serverUrl, NetProxy? proxy = null, bool preferIPv6 = false, bool ignoreCertificateErrors = false, IDnsClient? dnsClient = null)
-            : this(new Uri(serverUrl), proxy, preferIPv6, ignoreCertificateErrors, dnsClient)
+        public HttpApiClient(Uri serverUrl, NetProxy? proxy = null, IPv6Mode ipv6Mode = IPv6Mode.Disabled, bool ignoreCertificateErrors = false, IDnsClient? dnsClient = null, TimeSpan? timeout = null)
+            : this(serverUrl, proxy, HttpClientNetworkHandler.GetNetworkType(ipv6Mode), ignoreCertificateErrors, dnsClient, timeout)
         { }
 
-        public HttpApiClient(Uri serverUrl, NetProxy? proxy = null, bool preferIPv6 = false, bool ignoreCertificateErrors = false, IDnsClient? dnsClient = null)
+        public HttpApiClient(Uri serverUrl, NetProxy? proxy = null, HttpClientNetworkType networkType = HttpClientNetworkType.Default, bool ignoreCertificateErrors = false, IDnsClient? dnsClient = null, TimeSpan? timeout = null)
         {
             _serverUrl = serverUrl;
 
             HttpClientNetworkHandler handler = new HttpClientNetworkHandler();
             handler.Proxy = proxy;
-            handler.NetworkType = preferIPv6 ? HttpClientNetworkType.PreferIPv6 : HttpClientNetworkType.Default;
+            handler.NetworkType = networkType;
             handler.DnsClient = dnsClient;
 
             if (ignoreCertificateErrors)
@@ -91,7 +91,7 @@ namespace DnsServerCore.HttpApi
             _httpClient = new HttpClient(handler);
             _httpClient.BaseAddress = _serverUrl;
             _httpClient.DefaultRequestHeaders.Add("user-agent", "Technitium DNS Server HTTP API Client");
-            _httpClient.Timeout = TimeSpan.FromSeconds(30);
+            _httpClient.Timeout = timeout ?? TimeSpan.FromSeconds(30);
         }
 
         #endregion

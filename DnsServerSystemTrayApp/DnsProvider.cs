@@ -1,6 +1,6 @@
 ﻿/*
 Technitium DNS Server
-Copyright (C) 2023  Shreyas Zare (shreyas@technitium.com)
+Copyright (C) 2026  Shreyas Zare (shreyas@technitium.com)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -46,7 +46,7 @@ namespace DnsServerSystemTrayApp
 
         public DnsProvider(BinaryReader bR)
         {
-            this.Name = bR.ReadShortString();
+            this.Name = bR.BaseStream.ReadShortString();
             this.Addresses = new List<IPAddress>();
 
             int count = bR.ReadInt32();
@@ -122,7 +122,7 @@ namespace DnsServerSystemTrayApp
 
         public void WriteTo(BinaryWriter bW)
         {
-            bW.WriteShortString(Name);
+            bW.BaseStream.WriteShortString(Name);
 
             bW.Write(Addresses.Count);
 

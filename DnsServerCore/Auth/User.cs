@@ -1,6 +1,6 @@
 ﻿/*
 Technitium DNS Server
-Copyright (C) 2025  Shreyas Zare (shreyas@technitium.com)
+Copyright (C) 2026  Shreyas Zare (shreyas@technitium.com)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -85,12 +85,12 @@ namespace DnsServerCore.Auth
             {
                 case 1:
                 case 2:
-                    _displayName = bR.ReadShortString();
-                    _username = bR.ReadShortString();
+                    _displayName = bR.BaseStream.ReadShortString();
+                    _username = bR.BaseStream.ReadShortString();
                     _passwordHashType = (UserPasswordHashType)bR.ReadByte();
                     _iterations = bR.ReadInt32();
                     _salt = bR.ReadBuffer();
-                    _passwordHash = bR.ReadShortString();
+                    _passwordHash = bR.BaseStream.ReadShortString();
 
                     if (version >= 2)
                     {
@@ -104,9 +104,9 @@ namespace DnsServerCore.Auth
                     _disabled = bR.ReadBoolean();
                     _sessionTimeoutSeconds = bR.ReadInt32();
 
-                    _previousSessionLoggedOn = bR.ReadDateTime();
+                    _previousSessionLoggedOn = bR.BaseStream.ReadDateTime();
                     _previousSessionRemoteAddress = IPAddressExtensions.ReadFrom(bR);
-                    _recentSessionLoggedOn = bR.ReadDateTime();
+                    _recentSessionLoggedOn = bR.BaseStream.ReadDateTime();
                     _recentSessionRemoteAddress = IPAddressExtensions.ReadFrom(bR);
 
                     {
@@ -115,7 +115,7 @@ namespace DnsServerCore.Auth
 
                         for (int i = 0; i < count; i++)
                         {
-                            if (groups.TryGetValue(bR.ReadShortString().ToLowerInvariant(), out Group group))
+                            if (groups.TryGetValue(bR.BaseStream.ReadShortString().ToLowerInvariant(), out Group group))
                                 _memberOfGroups.TryAdd(group.Name.ToLowerInvariant(), group);
                         }
                     }
@@ -260,12 +260,12 @@ namespace DnsServerCore.Auth
         public void WriteTo(BinaryWriter bW)
         {
             bW.Write((byte)2);
-            bW.WriteShortString(_displayName);
-            bW.WriteShortString(_username);
+            bW.BaseStream.WriteShortString(_displayName);
+            bW.BaseStream.WriteShortString(_username);
             bW.Write((byte)_passwordHashType);
             bW.Write(_iterations);
             bW.WriteBuffer(_salt);
-            bW.WriteShortString(_passwordHash);
+            bW.BaseStream.WriteShortString(_passwordHash);
 
             if (_totpKeyUri is null)
                 bW.Write("");
@@ -276,15 +276,15 @@ namespace DnsServerCore.Auth
             bW.Write(_disabled);
             bW.Write(_sessionTimeoutSeconds);
 
-            bW.Write(_previousSessionLoggedOn);
+            bW.BaseStream.WriteDateTime(_previousSessionLoggedOn);
             IPAddressExtensions.WriteTo(_previousSessionRemoteAddress, bW);
-            bW.Write(_recentSessionLoggedOn);
+            bW.BaseStream.WriteDateTime(_recentSessionLoggedOn);
             IPAddressExtensions.WriteTo(_recentSessionRemoteAddress, bW);
 
             bW.Write(Convert.ToByte(_memberOfGroups.Count));
 
             foreach (KeyValuePair<string, Group> group in _memberOfGroups)
-                bW.WriteShortString(group.Value.Name.ToLowerInvariant());
+                bW.BaseStream.WriteShortString(group.Value.Name.ToLowerInvariant());
         }
 
         public override bool Equals(object obj)

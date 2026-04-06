@@ -1,6 +1,6 @@
 ﻿/*
 Technitium DNS Server
-Copyright (C) 2025  Shreyas Zare (shreyas@technitium.com)
+Copyright (C) 2026  Shreyas Zare (shreyas@technitium.com)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -63,29 +63,9 @@ namespace DnsServerCore
 
             private void RestartService(bool restartDnsService, bool restartWebService, IReadOnlyList<IPAddress> oldWebServiceLocalAddresses, int oldWebServiceHttpPort, int oldWebServiceTlsPort)
             {
-                if (restartDnsService)
+                ThreadPool.QueueUserWorkItem(async delegate (object state)
                 {
-                    ThreadPool.QueueUserWorkItem(async delegate (object state)
-                    {
-                        try
-                        {
-                            _dnsWebService._log.Write("Attempting to restart DNS service.");
-
-                            await _dnsWebService._dnsServer.StopAsync();
-                            await _dnsWebService._dnsServer.StartAsync();
-
-                            _dnsWebService._log.Write("DNS service was restarted successfully.");
-                        }
-                        catch (Exception ex)
-                        {
-                            _dnsWebService._log.Write("Failed to restart DNS service.\r\n" + ex.ToString());
-                        }
-                    });
-                }
-
-                if (restartWebService)
-                {
-                    ThreadPool.QueueUserWorkItem(async delegate (object state)
+                    if (restartWebService)
                     {
                         try
                         {
@@ -113,8 +93,25 @@ namespace DnsServerCore
                         {
                             _dnsWebService._log.Write(ex);
                         }
-                    });
-                }
+                    }
+
+                    if (restartDnsService)
+                    {
+                        try
+                        {
+                            _dnsWebService._log.Write("Attempting to restart DNS service.");
+
+                            await _dnsWebService._dnsServer.StopAsync();
+                            await _dnsWebService._dnsServer.StartAsync();
+
+                            _dnsWebService._log.Write("DNS service was restarted successfully.");
+                        }
+                        catch (Exception ex)
+                        {
+                            _dnsWebService._log.Write("Failed to restart DNS service.\r\n" + ex.ToString());
+                        }
+                    }
+                });
             }
 
             private void WriteDnsSettings(Utf8JsonWriter jsonWriter)
@@ -152,7 +149,8 @@ namespace DnsServerCore
 
                 jsonWriter.WriteBoolean("dnsAppsEnableAutomaticUpdate", _dnsWebService._dnsServer.DnsApplicationManager.EnableAutomaticUpdate);
 
-                jsonWriter.WriteBoolean("preferIPv6", _dnsWebService._dnsServer.PreferIPv6);
+                jsonWriter.WriteString("ipv6Mode", _dnsWebService._dnsServer.IPv6Mode.ToString());
+                jsonWriter.WriteBoolean("preferIPv6", _dnsWebService._dnsServer.IPv6Mode == IPv6Mode.Preferred);
                 jsonWriter.WriteBoolean("enableUdpSocketPool", _dnsWebService._dnsServer.EnableUdpSocketPool);
 
                 jsonWriter.WriteStartArray("socketPoolExcludedPorts");
@@ -226,6 +224,8 @@ namespace DnsServerCore
                 jsonWriter.WriteNumber("quicIdleTimeout", _dnsWebService._dnsServer.QuicIdleTimeout);
                 jsonWriter.WriteNumber("quicMaxInboundStreams", _dnsWebService._dnsServer.QuicMaxInboundStreams);
                 jsonWriter.WriteNumber("listenBacklog", _dnsWebService._dnsServer.ListenBacklog);
+                jsonWriter.WriteNumber("udpSendBufferSizeKB", _dnsWebService._dnsServer.UdpSendBufferSizeKB);
+                jsonWriter.WriteNumber("udpReceiveBufferSizeKB", _dnsWebService._dnsServer.UdpReceiveBufferSizeKB);
                 jsonWriter.WriteNumber("maxConcurrentResolutionsPerCore", _dnsWebService._dnsServer.MaxConcurrentResolutionsPerCore);
 
                 //web service
@@ -253,6 +253,7 @@ namespace DnsServerCore
                 jsonWriter.WriteString("webServiceRealIpHeader", _dnsWebService._webServiceRealIpHeader);
 
                 //optional protocols
+                jsonWriter.WriteBoolean("enableEDnsClientSubnetSourceAddress", _dnsWebService._dnsServer.EnableEDnsClientSubnetSourceAddress);
                 jsonWriter.WriteBoolean("enableDnsOverUdpProxy", _dnsWebService._dnsServer.EnableDnsOverUdpProxy);
                 jsonWriter.WriteBoolean("enableDnsOverTcpProxy", _dnsWebService._dnsServer.EnableDnsOverTcpProxy);
                 jsonWriter.WriteBoolean("enableDnsOverHttp", _dnsWebService._dnsServer.EnableDnsOverHttp);
@@ -649,8 +650,10 @@ namespace DnsServerCore
                             clusterParameters.Add("dnsAppsEnableAutomaticUpdate", dnsAppsEnableAutomaticUpdate.ToString());
                         }
 
-                        if (request.TryGetQueryOrForm("preferIPv6", bool.Parse, out bool preferIPv6))
-                            _dnsWebService._dnsServer.PreferIPv6 = preferIPv6;
+                        if (request.TryGetQueryOrFormEnum("ipv6Mode", out IPv6Mode ipv6Mode))
+                            _dnsWebService._dnsServer.IPv6Mode = ipv6Mode;
+                        else if (request.TryGetQueryOrForm("preferIPv6", bool.Parse, out bool preferIPv6))
+                            _dnsWebService._dnsServer.IPv6Mode = preferIPv6 ? IPv6Mode.Preferred : IPv6Mode.Disabled;
 
                         if (request.TryGetQueryOrForm("enableUdpSocketPool", bool.Parse, out bool enableUdpSocketPool))
                             _dnsWebService._dnsServer.EnableUdpSocketPool = enableUdpSocketPool;
@@ -876,6 +879,28 @@ namespace DnsServerCore
                             clusterParameters.Add("listenBacklog", listenBacklog.ToString());
                         }
 
+                        if (request.TryGetQueryOrForm("udpSendBufferSizeKB", int.Parse, out int udpSendBufferSizeKB))
+                        {
+                            if (_dnsWebService._dnsServer.UdpSendBufferSizeKB != udpSendBufferSizeKB)
+                            {
+                                _dnsWebService._dnsServer.UdpSendBufferSizeKB = udpSendBufferSizeKB;
+                                restartDnsService = true;
+                            }
+
+                            clusterParameters.Add("udpSendBufferSizeKB", udpSendBufferSizeKB.ToString());
+                        }
+
+                        if (request.TryGetQueryOrForm("udpReceiveBufferSizeKB", int.Parse, out int udpReceiveBufferSizeKB))
+                        {
+                            if (_dnsWebService._dnsServer.UdpReceiveBufferSizeKB != udpReceiveBufferSizeKB)
+                            {
+                                _dnsWebService._dnsServer.UdpReceiveBufferSizeKB = udpReceiveBufferSizeKB;
+                                restartDnsService = true;
+                            }
+
+                            clusterParameters.Add("udpReceiveBufferSizeKB", udpReceiveBufferSizeKB.ToString());
+                        }
+
                         if (request.TryGetQueryOrForm("maxConcurrentResolutionsPerCore", ushort.Parse, out ushort maxConcurrentResolutionsPerCore))
                         {
                             _dnsWebService._dnsServer.MaxConcurrentResolutionsPerCore = maxConcurrentResolutionsPerCore;
@@ -993,6 +1018,9 @@ namespace DnsServerCore
                         #endregion
 
                         #region optional protocols
+
+                        if (request.TryGetQueryOrForm("enableEDnsClientSubnetSourceAddress", bool.Parse, out bool enableEDnsClientSubnetSourceAddress))
+                            _dnsWebService._dnsServer.EnableEDnsClientSubnetSourceAddress = enableEDnsClientSubnetSourceAddress;
 
                         if (request.TryGetQueryOrForm("enableDnsOverUdpProxy", bool.Parse, out bool enableDnsOverUdpProxy))
                         {
@@ -1819,7 +1847,7 @@ namespace DnsServerCore
                 {
                     UserSession session = context.GetCurrentSession();
 
-                    if ((session.Type == UserSessionType.ApiToken) && session.TokenName.Equals(_dnsWebService._clusterManager.ClusterDomain, StringComparison.OrdinalIgnoreCase))
+                    if (session.Type == UserSessionType.ClusterApiToken)
                         return; //call from cluster node itself
 
                     //relay action on all other cluster nodes async
@@ -1876,7 +1904,7 @@ namespace DnsServerCore
                 {
                     UserSession session = context.GetCurrentSession();
 
-                    if ((session.Type == UserSessionType.ApiToken) && session.TokenName.Equals(_dnsWebService._clusterManager.ClusterDomain, StringComparison.OrdinalIgnoreCase))
+                    if (session.Type == UserSessionType.ClusterApiToken)
                         return; //call from cluster node itself
 
                     //relay action on all other cluster nodes async

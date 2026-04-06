@@ -1,6 +1,6 @@
 ﻿/*
 Technitium DNS Server
-Copyright (C) 2024  Shreyas Zare (shreyas@technitium.com)
+Copyright (C) 2026  Shreyas Zare (shreyas@technitium.com)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -591,7 +591,7 @@ namespace DnsBlockList
                         ipv6AddressMap.TryAdd(entry.Key, entry);
                     }
 
-                    NetworkMap<BlockEntry<NetworkAddress>> ipv4NetworkMap = new NetworkMap<BlockEntry<NetworkAddress>>(ipv4Networks.Count);
+                    NetworkMap<BlockEntry<NetworkAddress>> ipv4NetworkMap = new NetworkMap<BlockEntry<NetworkAddress>>(AddressFamily.InterNetwork, ipv4Networks.Count);
 
                     while (ipv4Networks.Count > 0)
                     {
@@ -599,7 +599,7 @@ namespace DnsBlockList
                         ipv4NetworkMap.Add(entry.Key, entry);
                     }
 
-                    NetworkMap<BlockEntry<NetworkAddress>> ipv6NetworkMap = new NetworkMap<BlockEntry<NetworkAddress>>(ipv6Networks.Count);
+                    NetworkMap<BlockEntry<NetworkAddress>> ipv6NetworkMap = new NetworkMap<BlockEntry<NetworkAddress>>(AddressFamily.InterNetworkV6, ipv6Networks.Count);
 
                     while (ipv6Networks.Count > 0)
                     {

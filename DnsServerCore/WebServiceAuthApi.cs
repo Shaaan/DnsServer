@@ -1,6 +1,6 @@
 ﻿/*
 Technitium DNS Server
-Copyright (C) 2025  Shreyas Zare (shreyas@technitium.com)
+Copyright (C) 2026  Shreyas Zare (shreyas@technitium.com)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -51,18 +51,26 @@ namespace DnsServerCore
 
             private void WriteCurrentSessionDetails(Utf8JsonWriter jsonWriter, UserSession currentSession, bool includeInfo)
             {
-                if (currentSession.Type == UserSessionType.ApiToken)
+                switch (currentSession.Type)
                 {
-                    jsonWriter.WriteString("username", currentSession.User.Username);
-                    jsonWriter.WriteString("tokenName", currentSession.TokenName);
-                    jsonWriter.WriteString("token", currentSession.Token);
-                }
-                else
-                {
-                    jsonWriter.WriteString("displayName", currentSession.User.DisplayName);
-                    jsonWriter.WriteString("username", currentSession.User.Username);
-                    jsonWriter.WriteBoolean("totpEnabled", currentSession.User.TOTPEnabled);
-                    jsonWriter.WriteString("token", currentSession.Token);
+                    case UserSessionType.ApiToken:
+                    case UserSessionType.ClusterApiToken:
+                        jsonWriter.WriteString("username", currentSession.User.Username);
+                        jsonWriter.WriteString("tokenName", currentSession.TokenName);
+                        jsonWriter.WriteString("token", currentSession.Token);
+                        break;
+
+                    case UserSessionType.SingleUse:
+                        jsonWriter.WriteString("username", currentSession.User.Username);
+                        jsonWriter.WriteString("token", currentSession.Token);
+                        break;
+
+                    default:
+                        jsonWriter.WriteString("displayName", currentSession.User.DisplayName);
+                        jsonWriter.WriteString("username", currentSession.User.Username);
+                        jsonWriter.WriteBoolean("totpEnabled", currentSession.User.TOTPEnabled);
+                        jsonWriter.WriteString("token", currentSession.Token);
+                        break;
                 }
 
                 if (includeInfo)
@@ -335,11 +343,22 @@ namespace DnsServerCore
                 WriteCurrentSessionDetails(jsonWriter, session, includeInfo);
             }
 
+            public void CreateSingleUseToken(HttpContext context)
+            {
+                User sessionUser = _dnsWebService.GetSessionUser(context);
+                IPEndPoint remoteEP = context.GetRemoteEndPoint(_dnsWebService._webServiceRealIpHeader);
+
+                UserSession createdSession = _dnsWebService._authManager.CreateSession(UserSessionType.SingleUse, null, sessionUser, remoteEP.Address, context.Request.Headers.UserAgent);
+
+                Utf8JsonWriter jsonWriter = context.GetCurrentJsonWriter();
+
+                jsonWriter.WriteString("username", createdSession.User.Username);
+                jsonWriter.WriteString("token", createdSession.Token);
+            }
+
             public void Logout(HttpContext context)
             {
-                string token = context.Request.GetQueryOrForm("token");
-
-                UserSession session = _dnsWebService._authManager.DeleteSession(token);
+                UserSession session = _dnsWebService._authManager.DeleteSession(GetAuthorizationToken(context.Request));
                 if (session is not null)
                 {
                     _dnsWebService._log.Write(context.GetRemoteEndPoint(_dnsWebService._webServiceRealIpHeader), "[" + session.User.Username + "] User logged out.");
@@ -508,7 +527,7 @@ namespace DnsServerCore
 
                 IPEndPoint remoteEP = context.GetRemoteEndPoint(_dnsWebService._webServiceRealIpHeader);
 
-                UserSession createdSession = _dnsWebService._authManager.CreateApiToken(tokenName, username, remoteEP.Address, request.Headers.UserAgent);
+                UserSession createdSession = _dnsWebService._authManager.CreateSession(UserSessionType.ApiToken, tokenName, username, remoteEP.Address, request.Headers.UserAgent);
 
                 _dnsWebService._log.Write(remoteEP, "[" + sessionUser.Username + "] API token [" + tokenName + "] was created successfully for user: " + username);
 
@@ -561,13 +580,16 @@ namespace DnsServerCore
 
                 if (_dnsWebService._clusterManager.ClusterInitialized)
                 {
-                    if (sessionToDelete.Type == UserSessionType.ApiToken)
+                    switch (sessionToDelete.Type)
                     {
-                        if (sessionToDelete.TokenName.Equals(_dnsWebService._clusterManager.ClusterDomain, StringComparison.OrdinalIgnoreCase))
-                            throw new DnsWebServiceException("Invalid operation: cannot delete the Cluster API token.");
+                        case UserSessionType.ApiToken:
+                            if (_dnsWebService._clusterManager.GetSelfNode().Type != Cluster.ClusterNodeType.Primary)
+                                throw new DnsWebServiceException("API tokens can be deleted only on the Primary node.");
 
-                        if (_dnsWebService._clusterManager.GetSelfNode().Type != Cluster.ClusterNodeType.Primary)
-                            throw new DnsWebServiceException("API tokens can be deleted only on the Primary node.");
+                            break;
+
+                        case UserSessionType.ClusterApiToken:
+                            throw new DnsWebServiceException("Invalid operation: cannot delete the Cluster API token.");
                     }
                 }
 
@@ -691,17 +713,38 @@ namespace DnsServerCore
 
                     if (request.TryGetQueryOrForm("disabled", bool.Parse, out bool disabled) && (sessionUser != user)) //to avoid self lockout
                     {
-                        user.Disabled = disabled;
+                        List<UserSession> userSessions = _dnsWebService._authManager.GetSessions(user);
+                        bool isClusterUser = false;
 
-                        if (user.Disabled)
+                        if (_dnsWebService._clusterManager.ClusterInitialized)
                         {
-                            foreach (UserSession userSession in _dnsWebService._authManager.Sessions)
+                            foreach (UserSession userSession in userSessions)
                             {
-                                if (userSession.Type == UserSessionType.ApiToken)
-                                    continue;
+                                if (userSession.Type == UserSessionType.ClusterApiToken)
+                                {
+                                    isClusterUser = true;
+                                    break;
+                                }
+                            }
+                        }
 
-                                if (userSession.User == user)
-                                    _dnsWebService._authManager.DeleteSession(userSession.Token);
+                        if (!isClusterUser)
+                        {
+                            user.Disabled = disabled;
+
+                            if (user.Disabled)
+                            {
+                                foreach (UserSession userSession in userSessions)
+                                {
+                                    switch (userSession.Type)
+                                    {
+                                        case UserSessionType.Standard:
+                                        case UserSessionType.SingleUse:
+                                            //logout user session
+                                            _dnsWebService._authManager.DeleteSession(userSession.Token);
+                                            break;
+                                    }
+                                }
                             }
                         }
                     }
@@ -785,18 +828,18 @@ namespace DnsServerCore
                         throw new DnsWebServiceException("No such user exists: " + username);
 
                     List<UserSession> userSessions = _dnsWebService.AuthManager.GetSessions(userToDelete);
-                    bool apiTokenExists = false;
+                    bool isClusterUser = false;
 
                     foreach (UserSession existingSession in userSessions)
                     {
-                        if ((existingSession.Type == UserSessionType.ApiToken) && (existingSession.TokenName == _dnsWebService._clusterManager.ClusterDomain))
+                        if (existingSession.Type == UserSessionType.ClusterApiToken)
                         {
-                            apiTokenExists = true;
+                            isClusterUser = true;
                             break;
                         }
                     }
 
-                    if (apiTokenExists)
+                    if (isClusterUser)
                         throw new DnsWebServiceException("Invalid operation: cannot delete a user who initialized the Cluster and owns the Cluster API token.");
                 }
 
